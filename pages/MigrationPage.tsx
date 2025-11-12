@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { SiteConfig, WpContent, ItemStatus } from '../types';
 import { getContent, getFullContentDetails, transferContent } from '../services/wordpressService';
 import { PostList } from '../components/PostList';
+import { ContentEditorModal } from '../components/ContentEditorModal';
 
 interface MigrationPageProps {
     sourceConfig: SiteConfig | null;
@@ -25,6 +26,9 @@ export const MigrationPage: React.FC<MigrationPageProps> = ({ sourceConfig, dest
     const [skipImageTransfer, setSkipImageTransfer] = useState(false);
     const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
     const [isBulkExporting, setIsBulkExporting] = useState<boolean>(false);
+
+    // Editor modal state
+    const [editingItem, setEditingItem] = useState<WpContent | null>(null);
 
     const filteredContent = useMemo(() => {
         if (!searchTerm) return contentItems;
@@ -89,11 +93,38 @@ export const MigrationPage: React.FC<MigrationPageProps> = ({ sourceConfig, dest
             const itemToExport = await getFullContentDetails(itemId, contentType, sourceConfig);
             await transferContent(itemToExport, contentType, sourceConfig, destConfig, skipImageTransfer);
             setItemStatuses(prev => ({ ...prev, [itemId]: { status: 'success' } }));
+        // Fix: Corrected syntax for catch block. Replaced `->` with `{`.
         } catch (err: any) {
             console.error(`Failed to export ${contentType} ${itemId}:`, err);
             setItemStatuses(prev => ({ ...prev, [itemId]: { status: 'error', message: err.message } }));
         }
     }, [sourceConfig, destConfig, skipImageTransfer, contentType]);
+
+    const handleEditItem = (itemId: number) => {
+        const itemToEdit = contentItems.find(item => item.id === itemId);
+        if (itemToEdit) {
+            setEditingItem(itemToEdit);
+        }
+    };
+
+    const handleExportEditedContent = useCallback(async (editedContent: WpContent) => {
+        if (!sourceConfig || !destConfig) {
+            alert("Please connect to both source and destination sites first.");
+            return;
+        }
+        const itemId = editedContent.id;
+        setItemStatuses(prev => ({ ...prev, [itemId]: { status: 'exporting' } }));
+        try {
+            await transferContent(editedContent, contentType, sourceConfig, destConfig, skipImageTransfer);
+            setItemStatuses(prev => ({ ...prev, [itemId]: { status: 'success' } }));
+            setEditingItem(null); // Close modal on success
+        } catch (err: any) {
+            console.error(`Failed to export edited ${contentType} ${itemId}:`, err);
+            // We don't update the main list status here, the modal will show the error
+            throw err; // Re-throw to be caught by the modal
+        }
+    }, [sourceConfig, destConfig, skipImageTransfer, contentType]);
+
 
     // --- Multi-select Handlers ---
     const handleToggleSelection = (itemId: number) => {
@@ -160,6 +191,13 @@ export const MigrationPage: React.FC<MigrationPageProps> = ({ sourceConfig, dest
 
     return (
         <div className="space-y-6">
+            {editingItem && (
+                <ContentEditorModal
+                    item={editingItem}
+                    onClose={() => setEditingItem(null)}
+                    onExport={handleExportEditedContent}
+                />
+            )}
             <div className="border-b border-slate-200 dark:border-slate-700 pb-2">
                 <nav className="flex space-x-2" aria-label="Tabs">
                     <button onClick={() => setContentType('posts')} className={getTabClassName('posts')}>
@@ -194,6 +232,7 @@ export const MigrationPage: React.FC<MigrationPageProps> = ({ sourceConfig, dest
                     items={filteredContent}
                     statuses={itemStatuses}
                     onExport={handleExportItem}
+                    onEdit={handleEditItem}
                     isDestinationConnected={!!destConfig}
                     onRefresh={handleRefresh}
                     isRefreshing={isRefreshing}

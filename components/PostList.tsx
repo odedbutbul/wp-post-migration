@@ -7,6 +7,7 @@ interface PostListProps {
     items: WpContent[];
     statuses: Record<number, ItemStatus>;
     onExport: (itemId: number) => void;
+    onEdit: (itemId: number) => void;
     isDestinationConnected: boolean;
     onRefresh: () => void;
     isRefreshing: boolean;
@@ -26,6 +27,7 @@ export const PostList: React.FC<PostListProps> = ({
     items,
     statuses,
     onExport,
+    onEdit,
     isDestinationConnected,
     onRefresh,
     isRefreshing,
@@ -132,6 +134,7 @@ export const PostList: React.FC<PostListProps> = ({
                             post={item}
                             status={statuses[item.id] || { status: 'idle' }}
                             onExport={() => onExport(item.id)}
+                            onEdit={() => onEdit(item.id)}
                             isDestinationConnected={isDestinationConnected}
                             isSelected={selectedIds.has(item.id)}
                             onToggleSelection={() => onToggleSelection(item.id)}
