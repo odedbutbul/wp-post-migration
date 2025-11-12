@@ -115,8 +115,26 @@ export async function getFullContentDetails(contentId: number, contentType: 'pos
 
 async function uploadMedia(imageUrl: string, filename: string, sourceConfig: SiteConfig, destConfig: SiteConfig): Promise<WpMedia> {
     let imageResponse: Response;
+
+    // Ensure the image URL is absolute before fetching
+    let absoluteImageUrl: string;
     try {
-        imageResponse = await fetch(getFinalUrl(imageUrl, sourceConfig.proxyUrl));
+        // Test if imageUrl is already a full URL
+        new URL(imageUrl);
+        absoluteImageUrl = imageUrl;
+    } catch (_) {
+        try {
+            // If not, it's likely a relative path. Construct an absolute URL from the source site's base URL.
+            absoluteImageUrl = new URL(imageUrl, sourceConfig.url).href;
+        } catch (e) {
+            throw new Error(`Could not resolve the image URL. The source site URL ('${sourceConfig.url}') or the image path ('${imageUrl}') may be invalid.`);
+        }
+    }
+
+    try {
+        // Use the resolved absolute URL to fetch the image data.
+        // A proxy is still necessary if the source server has a restrictive CORS policy.
+        imageResponse = await fetch(getFinalUrl(absoluteImageUrl, sourceConfig.proxyUrl));
     } catch (error: any) {
         console.error("Image download failed:", error);
         let detailedMessage: string;
