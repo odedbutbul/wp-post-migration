@@ -1,0 +1,5 @@
+{
+  "name": "WordPress Post Migrator",
+  "description": "A tool to easily migrate WordPress posts from a source site to a destination site using their REST APIs. Connect both sites, view a list of posts from the source, and transfer them individually with a single click.",
+  "requestFramePermissions": []
+}
