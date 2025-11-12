@@ -1,4 +1,4 @@
-import type { SiteConfig, WpPost, WpMedia, WpTerm, CreatePostPayload } from '../types';
+import type { SiteConfig, WpContent, WpMedia, WpTerm, CreateContentPayload } from '../types';
 
 // A version of SiteConfig without the username, for validation purposes
 interface ConnectionConfig {
@@ -64,51 +64,51 @@ export async function validateConnection(config: ConnectionConfig): Promise<void
 }
 
 
-export async function getPosts(config: SiteConfig, onProgress?: (progress: { loaded: number; total: number }) => void): Promise<WpPost[]> {
+export async function getContent(config: SiteConfig, contentType: 'posts' | 'pages', onProgress?: (progress: { loaded: number; total: number }) => void): Promise<WpContent[]> {
     const perPage = 100;
-    const firstPageUrl = `${config.url}/wp-json/wp/v2/posts?_embed&per_page=${perPage}&page=1`;
+    const firstPageUrl = `${config.url}/wp-json/wp/v2/${contentType}?_embed&per_page=${perPage}&page=1`;
 
     const initialResponse = await fetch(getFinalUrl(firstPageUrl, config.proxyUrl), {
         headers: { 'Authorization': `Basic ${config.token}` }
     });
 
     if (!initialResponse.ok) {
-        const errorData = await initialResponse.json().catch(() => ({ message: 'Unknown error getting posts' }));
+        const errorData = await initialResponse.json().catch(() => ({ message: `Unknown error getting ${contentType}` }));
         throw new Error(errorData.message || `HTTP error! status: ${initialResponse.status}`);
     }
 
     const totalPages = parseInt(initialResponse.headers.get('X-WP-TotalPages') || '1', 10);
-    const totalPosts = parseInt(initialResponse.headers.get('X-WP-Total') || '0', 10);
+    const totalItems = parseInt(initialResponse.headers.get('X-WP-Total') || '0', 10);
     
-    const firstPagePosts = await initialResponse.json() as WpPost[];
-    let allPosts = [...firstPagePosts];
+    const firstPageItems = await initialResponse.json() as WpContent[];
+    let allItems = [...firstPageItems];
 
-    onProgress?.({ loaded: allPosts.length, total: totalPosts });
+    onProgress?.({ loaded: allItems.length, total: totalItems });
 
     if (totalPages <= 1) {
-        return allPosts;
+        return allItems;
     }
 
-    const pagePromises: Promise<WpPost[]>[] = [];
+    const pagePromises: Promise<WpContent[]>[] = [];
     for (let page = 2; page <= totalPages; page++) {
-        const pageUrl = `${config.url}/wp-json/wp/v2/posts?_embed&per_page=${perPage}&page=${page}`;
-        pagePromises.push(apiFetch<WpPost[]>(getFinalUrl(pageUrl, config.proxyUrl), {
+        const pageUrl = `${config.url}/wp-json/wp/v2/${contentType}?_embed&per_page=${perPage}&page=${page}`;
+        pagePromises.push(apiFetch<WpContent[]>(getFinalUrl(pageUrl, config.proxyUrl), {
             headers: { 'Authorization': `Basic ${config.token}` }
         }));
     }
 
     const remainingPagesResults = await Promise.all(pagePromises);
-    for (const pagePosts of remainingPagesResults) {
-        allPosts.push(...pagePosts);
+    for (const pageItems of remainingPagesResults) {
+        allItems.push(...pageItems);
     }
     
-    onProgress?.({ loaded: allPosts.length, total: totalPosts });
-    return allPosts;
+    onProgress?.({ loaded: allItems.length, total: totalItems });
+    return allItems;
 }
 
-export async function getFullPostDetails(postId: number, config: SiteConfig): Promise<WpPost> {
-    const apiUrl = `${config.url}/wp-json/wp/v2/posts/${postId}?_embed`;
-    return apiFetch<WpPost>(getFinalUrl(apiUrl, config.proxyUrl), {
+export async function getFullContentDetails(contentId: number, contentType: 'posts' | 'pages', config: SiteConfig): Promise<WpContent> {
+    const apiUrl = `${config.url}/wp-json/wp/v2/${contentType}/${contentId}?_embed`;
+    return apiFetch<WpContent>(getFinalUrl(apiUrl, config.proxyUrl), {
         headers: { 'Authorization': `Basic ${config.token}` }
     });
 }
@@ -196,19 +196,25 @@ async function findOrCreateTerm(term: WpTerm, destConfig: SiteConfig): Promise<n
 }
 
 
-export async function transferPost(post: WpPost, sourceConfig: SiteConfig, destConfig: SiteConfig, skipImageTransfer: boolean = false): Promise<void> {
-    const postPayload: CreatePostPayload = {
-        title: post.title.rendered,
-        content: post.content.rendered,
-        status: post.status,
+export async function transferContent(content: WpContent, contentType: 'posts' | 'pages', sourceConfig: SiteConfig, destConfig: SiteConfig, skipImageTransfer: boolean = false): Promise<void> {
+    const contentPayload: CreateContentPayload = {
+        title: content.title.rendered,
+        content: content.content.rendered,
+        status: content.status,
     };
+
+    if (contentType === 'pages' && content.parent) {
+        // Note: This assumes parent pages have been migrated and we can find their new ID.
+        // For simplicity, we are not implementing parent mapping in this version.
+        // contentPayload.parent = await findNewParentId(content.parent, destConfig);
+    }
 
     if (!skipImageTransfer) {
         try {
-            const featuredMedia = post._embedded['wp:featuredmedia']?.[0];
+            const featuredMedia = content._embedded['wp:featuredmedia']?.[0];
             if (featuredMedia) {
                 const newMedia = await uploadMedia(featuredMedia.source_url, featuredMedia.media_details.file, sourceConfig, destConfig);
-                postPayload.featured_media = newMedia.id;
+                contentPayload.featured_media = newMedia.id;
             }
         } catch (error: any) {
             console.error("Error during media transfer:", error);
@@ -216,38 +222,40 @@ export async function transferPost(post: WpPost, sourceConfig: SiteConfig, destC
         }
     }
     
-    try {
-        const terms = post._embedded['wp:term']?.flat() || [];
-        const categoryIds: number[] = [];
-        const tagIds: number[] = [];
+    if (contentType === 'posts') {
+        try {
+            const terms = content._embedded['wp:term']?.flat() || [];
+            const categoryIds: number[] = [];
+            const tagIds: number[] = [];
 
-        for (const term of terms) {
-            const newTermId = await findOrCreateTerm(term, destConfig);
-            if (term.taxonomy === 'category') {
-                categoryIds.push(newTermId);
-            } else {
-                tagIds.push(newTermId);
+            for (const term of terms) {
+                const newTermId = await findOrCreateTerm(term, destConfig);
+                if (term.taxonomy === 'category') {
+                    categoryIds.push(newTermId);
+                } else {
+                    tagIds.push(newTermId);
+                }
             }
+            if (categoryIds.length > 0) contentPayload.categories = categoryIds;
+            if (tagIds.length > 0) contentPayload.tags = tagIds;
+        } catch (error: any) {
+            console.error("Error during taxonomy transfer:", error);
+            throw new Error(`Taxonomy (category/tag) transfer failed: ${error.message}`);
         }
-        if (categoryIds.length > 0) postPayload.categories = categoryIds;
-        if (tagIds.length > 0) postPayload.tags = tagIds;
-    } catch (error: any) {
-        console.error("Error during taxonomy transfer:", error);
-        throw new Error(`Taxonomy (category/tag) transfer failed: ${error.message}`);
     }
     
     try {
-        const createPostUrl = `${destConfig.url}/wp-json/wp/v2/posts`;
-        await apiFetch<WpPost>(getFinalUrl(createPostUrl, destConfig.proxyUrl), {
+        const createContentUrl = `${destConfig.url}/wp-json/wp/v2/${contentType}`;
+        await apiFetch<WpContent>(getFinalUrl(createContentUrl, destConfig.proxyUrl), {
             method: 'POST',
             headers: {
                 'Authorization': `Basic ${destConfig.token}`,
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(postPayload),
+            body: JSON.stringify(contentPayload),
         });
     } catch (error: any) {
-        console.error("Error during post creation:", error);
-        throw new Error(`Post creation failed: ${error.message}`);
+        console.error(`Error during ${contentType} creation:`, error);
+        throw new Error(`${contentType.slice(0, -1)} creation failed: ${error.message}`);
     }
 }

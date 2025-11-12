@@ -14,7 +14,7 @@ export interface SiteConfig {
     proxyUrl?: string;
 }
 
-export interface WpPost {
+export interface WpContent {
     id: number;
     date: string;
     title: {
@@ -33,6 +33,8 @@ export interface WpPost {
     status: 'publish' | 'future' | 'draft' | 'pending' | 'private';
     categories: number[];
     tags: number[];
+    parent?: number;
+    menu_order?: number;
     _embedded: {
         author: WpUser[];
         'wp:featuredmedia'?: WpMedia[];
@@ -62,16 +64,17 @@ export interface WpTerm {
     taxonomy: 'category' | 'post_tag';
 }
 
-export interface PostStatus {
+export interface ItemStatus {
     status: 'idle' | 'exporting' | 'success' | 'error';
     message?: string;
 }
 
-export interface CreatePostPayload {
+export interface CreateContentPayload {
     title: string;
     content: string;
     status: 'publish' | 'future' | 'draft' | 'pending' | 'private';
     categories?: number[];
     tags?: number[];
     featured_media?: number;
+    parent?: number;
 }

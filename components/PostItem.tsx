@@ -1,10 +1,10 @@
 import React from 'react';
-import type { WpPost, PostStatus } from '../types';
+import type { WpContent, ItemStatus } from '../types';
 import { ExportIcon, SpinnerIcon, CheckCircleIcon, ExclamationCircleIcon } from './icons';
 
 interface PostItemProps {
-    post: WpPost;
-    status: PostStatus;
+    post: WpContent;
+    status: ItemStatus;
     onExport: () => void;
     isDestinationConnected: boolean;
     isSelected: boolean;

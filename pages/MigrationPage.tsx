@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import type { SiteConfig, WpPost, PostStatus } from '../types';
-import { getPosts, getFullPostDetails, transferPost } from '../services/wordpressService';
+import type { SiteConfig, WpContent, ItemStatus } from '../types';
+import { getContent, getFullContentDetails, transferContent } from '../services/wordpressService';
 import { PostList } from '../components/PostList';
 
 interface MigrationPageProps {
@@ -10,47 +10,49 @@ interface MigrationPageProps {
 }
 
 export const MigrationPage: React.FC<MigrationPageProps> = ({ sourceConfig, destConfig, onNavigateToSettings }) => {
-    // Post data and statuses
-    const [posts, setPosts] = useState<WpPost[]>([]);
+    const [contentType, setContentType] = useState<'posts' | 'pages'>('posts');
+    
+    // Content data and statuses
+    const [contentItems, setContentItems] = useState<WpContent[]>([]);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [loadingProgress, setLoadingProgress] = useState<{ loaded: number; total: number } | null>(null);
     const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
-    const [postStatuses, setPostStatuses] = useState<Record<number, PostStatus>>({});
+    const [itemStatuses, setItemStatuses] = useState<Record<number, ItemStatus>>({});
     
     // UI controls & multi-select state
     const [searchTerm, setSearchTerm] = useState('');
     const [skipImageTransfer, setSkipImageTransfer] = useState(false);
-    const [selectedPostIds, setSelectedPostIds] = useState<Set<number>>(new Set());
+    const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
     const [isBulkExporting, setIsBulkExporting] = useState<boolean>(false);
 
-    const filteredPosts = useMemo(() => {
-        if (!searchTerm) return posts;
+    const filteredContent = useMemo(() => {
+        if (!searchTerm) return contentItems;
         const decodeHtml = (html: string) => {
             const txt = document.createElement("textarea");
             txt.innerHTML = html;
             return txt.value;
         }
-        return posts.filter(post =>
-            decodeHtml(post.title.rendered).toLowerCase().includes(searchTerm.toLowerCase())
+        return contentItems.filter(item =>
+            decodeHtml(item.title.rendered).toLowerCase().includes(searchTerm.toLowerCase())
         );
-    }, [posts, searchTerm]);
+    }, [contentItems, searchTerm]);
 
-    const fetchPosts = useCallback((config: SiteConfig, isRefresh: boolean = false) => {
+    const fetchContent = useCallback((config: SiteConfig, type: 'posts' | 'pages', isRefresh: boolean = false) => {
         setError(null);
         if (!isRefresh) {
-            setPosts([]);
-            setPostStatuses({});
-            setSelectedPostIds(new Set());
+            setContentItems([]);
+            setItemStatuses({});
+            setSelectedItemIds(new Set());
             setIsLoading(true);
             setLoadingProgress(null);
         }
-        return getPosts(config, setLoadingProgress)
-            .then(fetchedPosts => {
-                setPosts(fetchedPosts);
+        return getContent(config, type, setLoadingProgress)
+            .then(fetchedContent => {
+                setContentItems(fetchedContent);
             })
             .catch(err => {
-                setError(`Failed to fetch posts: ${err.message}. Please check your connection on the Settings page.`);
+                setError(`Failed to fetch ${type}: ${err.message}. Please check your connection on the Settings page.`);
             })
             .finally(() => {
                 if (!isRefresh) setIsLoading(false);
@@ -60,83 +62,91 @@ export const MigrationPage: React.FC<MigrationPageProps> = ({ sourceConfig, dest
 
     useEffect(() => {
         if (sourceConfig) {
-            fetchPosts(sourceConfig);
+            fetchContent(sourceConfig, contentType);
         } else {
-            // If source config is removed, clear posts
-            setPosts([]);
+            // If source config is removed, clear content
+            setContentItems([]);
             setError(null);
         }
-    }, [sourceConfig, fetchPosts]);
+    }, [sourceConfig, contentType, fetchContent]);
 
-    const handleRefreshPosts = useCallback(async () => {
+    const handleRefresh = useCallback(async () => {
         if (!sourceConfig) return;
         setIsRefreshing(true);
         setError(null);
-        await fetchPosts(sourceConfig, true);
+        await fetchContent(sourceConfig, contentType, true);
         setIsRefreshing(false);
-        setSelectedPostIds(new Set());
-    }, [sourceConfig, fetchPosts]);
+        setSelectedItemIds(new Set());
+    }, [sourceConfig, contentType, fetchContent]);
 
-    const handleExportPost = useCallback(async (postId: number) => {
+    const handleExportItem = useCallback(async (itemId: number) => {
         if (!sourceConfig || !destConfig) {
             alert("Please connect to both source and destination sites first.");
             return;
         }
-        setPostStatuses(prev => ({ ...prev, [postId]: { status: 'exporting' } }));
+        setItemStatuses(prev => ({ ...prev, [itemId]: { status: 'exporting' } }));
         try {
-            const postToExport = await getFullPostDetails(postId, sourceConfig);
-            await transferPost(postToExport, sourceConfig, destConfig, skipImageTransfer);
-            setPostStatuses(prev => ({ ...prev, [postId]: { status: 'success' } }));
+            const itemToExport = await getFullContentDetails(itemId, contentType, sourceConfig);
+            await transferContent(itemToExport, contentType, sourceConfig, destConfig, skipImageTransfer);
+            setItemStatuses(prev => ({ ...prev, [itemId]: { status: 'success' } }));
         } catch (err: any) {
-            console.error(`Failed to export post ${postId}:`, err);
-            setPostStatuses(prev => ({ ...prev, [postId]: { status: 'error', message: err.message } }));
+            console.error(`Failed to export ${contentType} ${itemId}:`, err);
+            setItemStatuses(prev => ({ ...prev, [itemId]: { status: 'error', message: err.message } }));
         }
-    }, [sourceConfig, destConfig, skipImageTransfer]);
+    }, [sourceConfig, destConfig, skipImageTransfer, contentType]);
 
     // --- Multi-select Handlers ---
-    const handleTogglePostSelection = (postId: number) => {
-        setSelectedPostIds(prev => {
+    const handleToggleSelection = (itemId: number) => {
+        setSelectedItemIds(prev => {
             const newSet = new Set(prev);
-            if (newSet.has(postId)) {
-                newSet.delete(postId);
+            if (newSet.has(itemId)) {
+                newSet.delete(itemId);
             } else {
-                newSet.add(postId);
+                newSet.add(itemId);
             }
             return newSet;
         });
     };
 
     const handleToggleSelectAll = () => {
-        if (selectedPostIds.size === filteredPosts.length) {
-            setSelectedPostIds(new Set());
+        if (selectedItemIds.size === filteredContent.length) {
+            setSelectedItemIds(new Set());
         } else {
-            setSelectedPostIds(new Set(filteredPosts.map(p => p.id)));
+            setSelectedItemIds(new Set(filteredContent.map(p => p.id)));
         }
     };
 
      const handleBulkExport = async () => {
-        if (!sourceConfig || !destConfig || selectedPostIds.size === 0) return;
+        if (!sourceConfig || !destConfig || selectedItemIds.size === 0) return;
         setIsBulkExporting(true);
-        const initialStatuses: Record<number, PostStatus> = {};
-        selectedPostIds.forEach(id => {
+        const initialStatuses: Record<number, ItemStatus> = {};
+        selectedItemIds.forEach(id => {
             initialStatuses[id] = { status: 'exporting' };
         });
-        setPostStatuses(prev => ({ ...prev, ...initialStatuses }));
+        setItemStatuses(prev => ({ ...prev, ...initialStatuses }));
 
-        for (const postId of selectedPostIds) {
-            await handleExportPost(postId);
+        for (const itemId of selectedItemIds) {
+            await handleExportItem(itemId);
         }
         
         setIsBulkExporting(false);
-        setSelectedPostIds(new Set());
+        setSelectedItemIds(new Set());
     };
+
+    const getTabClassName = (tabType: typeof contentType) => 
+        `px-3 py-2 font-medium text-sm rounded-md cursor-pointer transition-colors ${
+            contentType === tabType
+                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300'
+                : 'text-slate-500 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800'
+        }`;
+
 
     if (!sourceConfig || !destConfig) {
         return (
             <div className="text-center bg-white dark:bg-slate-800/50 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700/50 p-12">
                 <h3 className="text-2xl font-bold tracking-tight">Connections Needed</h3>
                 <p className="text-slate-500 dark:text-slate-400 mt-4 max-w-xl mx-auto">
-                    To begin migrating posts, please set up your source and destination WordPress sites on the settings page.
+                    To begin migrating content, please set up your source and destination WordPress sites on the settings page.
                 </p>
                 <button 
                     onClick={onNavigateToSettings}
@@ -149,9 +159,20 @@ export const MigrationPage: React.FC<MigrationPageProps> = ({ sourceConfig, dest
     }
 
     return (
-        <>
+        <div className="space-y-6">
+            <div className="border-b border-slate-200 dark:border-slate-700 pb-2">
+                <nav className="flex space-x-2" aria-label="Tabs">
+                    <button onClick={() => setContentType('posts')} className={getTabClassName('posts')}>
+                        Posts
+                    </button>
+                    <button onClick={() => setContentType('pages')} className={getTabClassName('pages')}>
+                        Pages
+                    </button>
+                </nav>
+            </div>
+
             {error && (
-                <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-md" role="alert">
+                <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert">
                     <p className="font-bold">Error</p>
                     <p>{error}</p>
                 </div>
@@ -164,34 +185,35 @@ export const MigrationPage: React.FC<MigrationPageProps> = ({ sourceConfig, dest
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                     <p className="ml-4 text-lg mt-4">
-                        Fetching posts... 
+                        Fetching {contentType}... 
                         {loadingProgress && ` (${loadingProgress.loaded}/${loadingProgress.total})`}
                     </p>
                 </div>
-            ) : posts.length > 0 ? (
+            ) : contentItems.length > 0 ? (
                 <PostList
-                    posts={filteredPosts}
-                    statuses={postStatuses}
-                    onExport={handleExportPost}
+                    items={filteredContent}
+                    statuses={itemStatuses}
+                    onExport={handleExportItem}
                     isDestinationConnected={!!destConfig}
-                    onRefresh={handleRefreshPosts}
+                    onRefresh={handleRefresh}
                     isRefreshing={isRefreshing}
                     searchTerm={searchTerm}
                     onSearchChange={setSearchTerm}
                     skipImageTransfer={skipImageTransfer}
                     onSkipImageChange={setSkipImageTransfer}
-                    selectedIds={selectedPostIds}
-                    onToggleSelection={handleTogglePostSelection}
+                    selectedIds={selectedItemIds}
+                    onToggleSelection={handleToggleSelection}
                     onToggleSelectAll={handleToggleSelectAll}
                     onBulkExport={handleBulkExport}
                     isBulkExporting={isBulkExporting}
+                    contentType={contentType}
                 />
             ) : sourceConfig && !isLoading && (
                  <div className="text-center bg-white dark:bg-slate-800/50 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700/50 p-12">
-                    <h3 className="text-xl font-medium">No Posts Found</h3>
-                    <p className="text-slate-500 dark:text-slate-400 mt-2">The source WordPress site does not have any posts, or they are not publicly accessible via the REST API.</p>
+                    <h3 className="text-xl font-medium">No {contentType === 'posts' ? 'Posts' : 'Pages'} Found</h3>
+                    <p className="text-slate-500 dark:text-slate-400 mt-2">The source WordPress site does not have any {contentType}, or they are not publicly accessible via the REST API.</p>
                 </div>
             )}
-        </>
+        </div>
     )
 };
