@@ -1,13 +1,16 @@
-export interface SavedSiteConfig {
+export interface SavedConnection {
+    id: string;
+    name: string;
     url: string;
-    username: string;
+    username: string; // For display purposes
+    token: string; // base64 encoded 'username:password'
     proxyUrl?: string;
 }
 
 export interface SiteConfig {
     url: string;
-    token: string; // base64 encoded 'username:password'
-    username: string; // For display purposes
+    token: string;
+    username: string;
     proxyUrl?: string;
 }
 

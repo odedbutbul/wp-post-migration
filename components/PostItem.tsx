@@ -1,5 +1,3 @@
-
-
 import React from 'react';
 import type { WpPost, PostStatus } from '../types';
 import { ExportIcon, SpinnerIcon, CheckCircleIcon, ExclamationCircleIcon } from './icons';
@@ -9,9 +7,11 @@ interface PostItemProps {
     status: PostStatus;
     onExport: () => void;
     isDestinationConnected: boolean;
+    isSelected: boolean;
+    onToggleSelection: () => void;
 }
 
-export const PostItem: React.FC<PostItemProps> = ({ post, status, onExport, isDestinationConnected }) => {
+export const PostItem: React.FC<PostItemProps> = ({ post, status, onExport, isDestinationConnected, isSelected, onToggleSelection }) => {
     const author = post._embedded?.author?.[0]?.name || 'Unknown Author';
     const featuredImageUrl = post._embedded?.['wp:featuredmedia']?.[0]?.source_url;
 
@@ -65,9 +65,28 @@ export const PostItem: React.FC<PostItemProps> = ({ post, status, onExport, isDe
         }
     };
 
+    const handleItemClick = (e: React.MouseEvent<HTMLLIElement>) => {
+        // Prevent toggling selection when the button or a link inside is clicked
+        if ((e.target as HTMLElement).closest('button, a')) {
+            return;
+        }
+        onToggleSelection();
+    };
+
+    const selectedClasses = isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50';
+
     return (
-        <li className="p-4 sm:p-6 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-150">
+        <li className={`p-4 sm:px-6 transition-colors duration-150 cursor-pointer ${selectedClasses}`} onClick={handleItemClick}>
             <div className="flex items-center space-x-4">
+                 <div className="flex items-center">
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={onToggleSelection}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        aria-labelledby={`post-title-${post.id}`}
+                    />
+                </div>
                 {featuredImageUrl ? (
                     <img className="h-16 w-16 rounded-md object-cover flex-shrink-0" src={featuredImageUrl} alt="" />
                 ) : (
@@ -78,7 +97,7 @@ export const PostItem: React.FC<PostItemProps> = ({ post, status, onExport, isDe
                     </div>
                 )}
                 <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 truncate" dangerouslySetInnerHTML={{ __html: post.title.rendered }}></p>
+                    <p id={`post-title-${post.id}`} className="text-sm font-semibold text-blue-600 dark:text-blue-400 truncate" dangerouslySetInnerHTML={{ __html: post.title.rendered }}></p>
                     <p className="text-sm text-slate-500 dark:text-slate-400">
                         By {author} on {new Date(post.date).toLocaleDateString()}
                     </p>
